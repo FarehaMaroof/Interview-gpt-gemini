@@ -5,8 +5,8 @@ import { TbCirclesFilled } from "react-icons/tb";
 function Intro() {
   return (
     <>
-      <div className="mx-auto w-3xl bg-blue-100 p-1 m-10 rounded-lg shadoow transition delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110 hover:bg-indigo-100 cursor pointer">
-       <p className='m-15 font-semibold text-blue-600 '>
+      <div className="mx-auto w-3xl max-sm:w-full bg-blue-100 p-1 m-10 rounded-lg shadoow transition delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110 hover:bg-indigo-100 cursor pointer">
+       <p className='m-15  font-semibold text-blue-600 max-sm:text-left'>
        Welcome to Interview GPT!
         Prepare for your next programming interview with ease. Interview GPT is your personal AI-powered interview coach that helps you:
 

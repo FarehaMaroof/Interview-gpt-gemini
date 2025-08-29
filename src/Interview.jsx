@@ -141,8 +141,20 @@ function Interview() {
   const handleStopListening = async () => {
     setIsListening(false);
     recognition.stop();
-    await getFeedback();
-  };
+
+    if (!transcript || transcript.trim().length === 0) {
+    setFeedback({
+      correctness: 0,
+      completeness: 0,
+      feedback: "No answer was provided. Please try again.",
+    });
+    return; // stop here, don’t call Gemini
+  }
+
+  // if transcript has content, then get Gemini feedback
+  await getFeedback();
+};
+   
   const handleReAttempt = () => {
     setFeedback(null); //clean the right hand answer
     // to start recording'
@@ -245,12 +257,14 @@ Provide your evaluation as a JSON object:
     }
   };
 
+
+
   return (
     <>
-      <div className="w-full h-20 bg-blue-400 flex gap-2 items-center justify-between p-5 border-b outline-none">
-        <div className="m-5 flex justify-start items-center gap-3 ">
-          <img src={logo} alt="Logo" className="rounded-full h-15 w-15" />
-          <p className="font-extrabold text-3xl text-gray-700 transition delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110">Interview GPT</p>
+      <div className="w-full sm:w-full h-20 bg-blue-400 flex gap-2 items-center justify-between p-5 border-b outline-none">
+        <div className="m-5 flex justify-start items-center gap-3 max-sm:m-2 max-sm:gap-1 ">
+          <img src={logo} alt="Logo" className="rounded-full h-15 w-15 " />
+          <p className="font-extrabold max-sm:text-xl text-3xl text-gray-700 transition delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110">Interview GPT</p>
         </div>
 
         <div className="">
@@ -289,19 +303,19 @@ Provide your evaluation as a JSON object:
       </div>
 
       <SignedIn>
-        <div className="w-full h-screen overflow-hidden">
-          <div className="max-w-4xl mx-auto flex">
+        <div className="w-full h-screen overflow-y-auto    ">
+          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row ">
             {/* <span>@{isSignesIn? user.firstName:""}</span> */}
             {/* Question Container */}
 
             <div
               className={`transition all${
                 feedbackLoadingStatus || feedback
-                  ? "w-1/2 h-screen p-5"
-                  : "w-xl"
+                  ? "w-full sm:w-1/2 h-auto sm:h-screen p-5"
+                  : "w-full"
               }`}
             >
-              <div className="mt-8 flex gap-2 justify-center items-center align-center border-b border-blue-800">
+              <div className="mt-8 flex gap-2 max-sm:block max-sm:m-5 justify-center items-center align-center border-b border-blue-800">
                 <p className=" text-blue-700 ">
                   Enter the Programming Language on which you want to give
                   interview :
@@ -361,9 +375,13 @@ Provide your evaluation as a JSON object:
             {/* feedback container */}
             <div
               className={`transition-all ${
-                feedbackLoadingStatus || feedback
-                  ? "w-1/2 border-l h-screen p-5 "
-                  : "w-0"
+                // feedbackLoadingStatus || feedback
+                //   ? "w-1/2 border-l h-screen p-5 "
+                //   : "w-0"
+
+                 feedbackLoadingStatus || feedback
+      ? "w-full sm:w-1/2 border-t sm:border-l h-auto p-5"
+      : "hidden"
               }`}
             >
               {feedback && (
