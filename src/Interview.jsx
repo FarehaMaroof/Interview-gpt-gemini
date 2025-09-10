@@ -1,451 +1,267 @@
-import React, { useEffect, useState, useRef } from "react";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-import logo from "./assets/logo.jpg";
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  useAuth,
-  UserButton,
-  useUser,
-} from "@clerk/clerk-react";
-import Intro from "./components/Intro";
-import { getFirestore, collection, addDoc } from "firebase/firestore";
-import { db } from "./firebaseConfig";
-import { Link } from "react-router-dom";
-import {
-  getDocs,
-  query,
-  orderBy,
-  where,
-  serverTimestamp,
-} from "firebase/firestore";
+import React, { useState, useRef, useEffect } from 'react';
 
-// import { Link } from "react-router-dom";
+// This is the single-file React component for the PDF Resume Interview Coach.
+// It combines a PDF viewer with an LLM-powered analysis tool.
 
-// import axios from 'axios';
+const App = () => {
+    // State variables
+    const [resumeFile, setResumeFile] = useState(null);
+    const [resumeContent, setResumeContent] = useState('');
+    const [userQuestion, setUserQuestion] = useState('');
+    const [aiResponse, setAiResponse] = useState(null);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isRendering, setIsRendering] = useState(false);
+    const [error, setError] = useState('');
+    const [isPdfJsReady, setIsPdfJsReady] = useState(false);
+    const pdfDisplayRef = useRef(null);
+    const pdfjsLibRef = useRef(null); // Ref to hold the loaded pdf.js library
 
-//firebase
-// const firebaseUrl ='https://frontend2-afaca-default-rtdb.asia-southeast1.firebasedatabase.app/';
+    // Dynamically import the pdf.js library
+    useEffect(() => {
+        const loadPdfJs = async () => {
+            try {
+                // Dynamic import of the library and its worker
+                const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.3.136/+esm');
+                pdfjsLibRef.current = pdfjs;
+                pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.3.136/build/pdf.worker.min.mjs';
+                setIsPdfJsReady(true);
+            } catch (err) {
+                console.error("Failed to load PDF library:", err);
+                setError('Failed to load PDF library. Please try refreshing the page.');
+            }
+        };
 
-// speech recognition setup
-const recognition = new (window.SpeechRecognition ||
-  window.webkitSpeechRecognition)();
-recognition.continuous = true;
-recognition.interimResults = true;
+        loadPdfJs();
+    }, []);
 
-// Initialize Gemini client
-const genAI = new GoogleGenerativeAI(import.meta.env.VITE_GEMINI_API_KEY);
+    // Function to render a single PDF page
+    const renderPage = async (page) => {
+        const viewport = page.getViewport({ scale: 1.5 });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
 
-function Interview() {
-  const [isListening, setIsListening] = useState(false);
-  const [transcript, setTranscript] = useState("");
-  const [feedbackLoadingStatus, setFeedbackLoadingStatus] = useState(false);
-  const [feedback, setFeedback] = useState(null);
-  const [reAttempt, setReAttempt] = useState(false);
-  const [question, setQuestion] = useState(null);
-  const [questionStatus, setQuestionStatus] = useState(true);
-  const hasFetchedQuestionRef = useRef(false);
-  //   let { user } = useUser(null);
-  //   let { isSignesIn } = useAuth();
-  const [value, setValue] = useState("");
-  //  const feedbackSavedRef = useRef(false);
-  const [allFeedbacks, setAllFeedbacks] = useState([]);
-  const { isLoaded, isSignedIn, userId } = useAuth();
+        const pageContainer = document.createElement('div');
+        pageContainer.className = 'pdf-page-container w-full aspect-auto rounded-lg shadow-md mb-4 overflow-hidden';
+        pageContainer.appendChild(canvas);
+        if (pdfDisplayRef.current) {
+            pdfDisplayRef.current.appendChild(pageContainer);
+        }
 
-  const saveFeedback = async ({ question, transcript, feedback }) => {
-    try {
-      await addDoc(collection(db, "Feedback"), {
-        question,
-        transcript,
-        feedback,
-        userId,
-        created_at: new Date().toISOString(),
-      });
-      console.log("Feedback saved!");
-    } catch (e) {
-      console.error("Error adding feedback: ", e);
-    }
-  };
-
-  //   const fetchFeedbacks = async () => {
-  //     try {
-  //       const q = query(
-  //         collection(db, "Feedback"),
-  //         orderBy("created_at", "desc")
-  //       );
-  //       const querySnapshot = await getDocs(q);
-  //       return querySnapshot.docs.map((doc) => ({
-  //         id: doc.id,
-  //         ...doc.data(),
-  //       }));
-  //     } catch (e) {
-  //       console.error("Error fetching feedbacks: ", e);
-  //       return [];
-  //     }
-  //   };
-
-  const fetchFeedbacksForUser = async (uid) => {
-    try {
-      if (!uid) return [];
-      const q = query(
-        collection(db, "Feedback"),
-        where("userId", "==", uid),
-        orderBy("created_at", "desc")
-      );
-      const snap = await getDocs(q);
-      return snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
-    } catch (e) {
-      console.error("Error fetching feedbacks: ", e);
-      return [];
-    }
-  };
-
-  useEffect(() => {
-    //  if (!hasFetchedQuestionRef.current) {
-    //   hasFetchedQuestionRef.current = true;
-    //   getQuestion().finally(() => setQuestionStatus(false));
-    // }
-    if (isLoaded && isSignedIn && userId) {
-      fetchFeedbacksForUser(userId).then(setAllFeedbacks);
-    }
-    //   fetchFeedbacks().then(setAllFeedbacks);
-    recognition.onresult = (e) => {
-      const current = e.resultIndex;
-      const transcript = e.results[current][0].transcript;
-      setTranscript(transcript);
+        const renderContext = {
+            canvasContext: context,
+            viewport: viewport
+        };
+        await page.render(renderContext).promise;
     };
-    recognition.onend = async () => {
-      setIsListening(false);
-      if (!question) return; // skip if no question exists
-      await getFeedback();
-      if (isListening) {
-        recognition.start(); // restart if it should still be listening
-      }
+
+    // Handles the file selection and reads the content
+    const handleFileChange = async (e) => {
+        if (!isPdfJsReady) {
+            setError('PDF library is not yet loaded. Please wait a moment and try again.');
+            return;
+        }
+
+        const file = e.target.files[0];
+        if (!file || file.type !== 'application/pdf') {
+            setError('Please upload a valid PDF file.');
+            setResumeFile(null);
+            setResumeContent('');
+            setAiResponse(null);
+            if (pdfDisplayRef.current) {
+                pdfDisplayRef.current.innerHTML = `<div class="message-box">Select a PDF file to begin the analysis.</div>`;
+            }
+            return;
+        }
+
+        setResumeFile(file);
+        setError('');
+        setIsLoading(true);
+        setIsRendering(true); // Start rendering process
+        setAiResponse(null);
+        if (pdfDisplayRef.current) {
+            pdfDisplayRef.current.innerHTML = `<div class="message-box">Extracting text and rendering PDF...</div>`;
+        }
+
+        const fileReader = new FileReader();
+        fileReader.onload = async (event) => {
+            const typedarray = new Uint8Array(event.target.result);
+            try {
+                const pdfDocument = await pdfjsLibRef.current.getDocument({ data: typedarray }).promise;
+                let fullText = '';
+
+                if (pdfDisplayRef.current) {
+                    pdfDisplayRef.current.innerHTML = ''; // Clear previous pages
+                }
+
+                // Render and extract text from all pages
+                for (let pageNum = 1; pageNum <= pdfDocument.numPages; pageNum++) {
+                    const page = await pdfDocument.getPage(pageNum);
+                    await renderPage(page);
+
+                    const textContent = await page.getTextContent();
+                    const pageText = textContent.items.map(item => item.str).join(' ');
+                    fullText += pageText + '\n';
+                }
+                setResumeContent(fullText);
+            } catch (err) {
+                console.error('Error loading PDF:', err);
+                setError('Failed to load PDF. Please try a different file.');
+            } finally {
+                setIsLoading(false);
+                setIsRendering(false);
+            }
+        };
+        fileReader.readAsArrayBuffer(file);
     };
-  }, [isLoaded, isSignedIn, userId]);
 
-  // async function fetchQuestion() {
-  //   {
-  //     await getQuestion();
+    // Asks the Gemini model to respond based on the resume
+    const getAnswerFromResume = async () => {
+        if (!resumeContent) {
+            setError('Please upload and process a resume first.');
+            return;
+        }
+        if (!userQuestion.trim()) {
+            setError('Please enter a question to get an answer.');
+            return;
+        }
 
-  //   }
-  //   fetchQuestion();
-  // }
+        setIsLoading(true);
+        setAiResponse(null);
+        setError('');
 
-  const handleStartListening = () => {
-    setIsListening(true);
-    recognition.start();
-  };
+        try {
+            const systemPrompt = "You are an interview coach and a resume analysis expert. Your task is to provide a concise and professional answer to a question based on the provided resume content. If the question cannot be answered from the resume, state that politely. You must provide a direct answer, without any additional conversational text or explanations. Do not mention personal information, only provide professional analysis.";
+            const userQuery = `Here is the resume content:\n---\n${resumeContent}\n---\n\nHere is the question to answer based on the resume:\n"${userQuestion}"`;
 
-  const handleStopListening = async () => {
-    setIsListening(false);
-    recognition.stop();
+            // Pull the API key from the environment variable.
+            const apiKey = process.env.REACT_APP_GOOGLE_API_KEY; 
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
 
-    if (!transcript || transcript.trim().length === 0) {
-    setFeedback({
-      correctness: 0,
-      completeness: 0,
-      feedback: "No answer was provided. Please try again.",
-    });
-    return; // stop here, don’t call Gemini
-  }
+            const payload = {
+                contents: [{ parts: [{ text: userQuery }] }],
+                systemInstruction: {
+                    parts: [{ text: systemPrompt }]
+                }
+            };
 
-  // if transcript has content, then get Gemini feedback
-  await getFeedback();
-};
-   
-  const handleReAttempt = () => {
-    setFeedback(null); //clean the right hand answer
-    // to start recording'
-    setTranscript("");
-    setIsListening(false);
-    setReAttempt(true);
-    recognition.start();
-  };
+            setAiResponse('Thinking...');
 
-  // to get new questions
+            const response = await fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
 
-  const getQuestion = async () => {
-    setQuestionStatus(true);
-    setFeedback(null);
-    setTranscript("");
-    try {
-      console.log("Getting question...");
+            if (!response.ok) {
+                throw new Error(`API error: ${response.status} ${response.statusText}`);
+            }
 
-      const prompt = `
-      You are an interview coach. Return only a single new random theoritical ${value} interview question ,some may be about datatypes in java ,some may be about variables,tokens etc,  generate new question everytime - no additional text or explaination.
-     
-       Question: ${question}
-       Answer: ${transcript}
-      `;
+            const result = await response.json();
+            const candidate = result.candidates?.[0];
 
-      // const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
-        generationConfig: {
-          responseMimeType: "application/json",
-        },
-      });
-      const res = await model.generateContent(prompt);
-      const json = JSON.parse(await res.response.text());
-      // json now holds your structured question object
-      // or appropriate key based on your schema
+            if (candidate && candidate.content?.parts?.[0]?.text) {
+                const text = candidate.content.parts[0].text;
+                setAiResponse(text);
+            } else {
+                setAiResponse('Analysis failed. The model did not return a valid response.');
+            }
 
-      setQuestion(json.question);
+        } catch (err) {
+            console.error(err);
+            setError('Failed to get a response. Please try again.');
+            setAiResponse('An error occurred during analysis.');
+        } finally {
+            setIsLoading(false);
+        }
+    };
 
-      setQuestionStatus(false);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setQuestionStatus(false);
-    }
-  };
+    return (
+        <div className="min-h-screen bg-gray-100 p-8 font-sans flex flex-col items-center">
+            <div className="w-full max-w-6xl bg-white p-8 rounded-xl shadow-lg grid grid-cols-1 lg:grid-cols-2 gap-8">
+                {/* Left Column: PDF Viewer */}
+                <div className="pdf-container flex flex-col items-center">
+                    <h1 className="text-3xl font-bold text-center text-purple-600 mb-2">PDF Resume Viewer</h1>
+                    <p className="text-center text-gray-600 mb-6">Upload and view a resume to begin.</p>
 
-  // reading and answering question section
-  const getFeedback = async () => {
-    setFeedbackLoadingStatus(true);
-    try {
-      console.log("Analyzing with Gemini...");
-
-      const prompt = `
-      You are an interview coach. The answer you'll review comes from speech-to-text transcription. Ignore minor recognition errors and filler words.
-Focus on evaluating core meaning.
-
-Question: ${question}
-Answer: ${transcript}
-
-Provide your evaluation as a JSON object:
-{
-  "correctness": <number 0-5> <if the answer is incorrect do give 0><how relevant the answer was>,
-  "completeness": <number 0-5> <if the answer is incorrect do give 0><how complete the aanswer was>,
-  "feedback": "<detailed feedback in max 150 words><string>"
-  
-}
-      `;
-
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent(prompt);
-      const raw = await result.response.text();
-
-      // Remove markdown code fences if present
-      const cleaned = raw.replace(/```json\s*|```/g, "").trim();
-
-      console.log("Cleaned feedback JSON:", cleaned);
-      const feedback = JSON.parse(cleaned);
-      setFeedback(feedback);
-
-      // Save feedback to Firestore
-      await saveFeedback({ question, transcript, feedback });
-      //    const parsed = JSON.parse(cleaned);
-      // setFeedback(parsed);
-
-      // Save feedback once
-      // if (!feedbackSavedRef.current) {
-      //   await axios.post(firebaseUrl, {
-      //     question,
-      //     transcript,
-      //     feedback: parsed,
-      //     timestamp: new Date().toISOString(),
-      //   });
-      //   feedbackSavedRef.current = true;
-      // }
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setFeedbackLoadingStatus(false);
-    }
-  };
-
-
-
-  return (
-    <>
-      <div className="w-full sm:w-full h-20 bg-blue-400 flex gap-2 items-center justify-between p-5 border-b outline-none">
-        <div className="m-5 flex justify-start items-center gap-3 max-sm:m-2 max-sm:gap-1 ">
-          <img src={logo} alt="Logo" className="rounded-full h-15 w-15 " />
-          <p className="font-extrabold max-sm:text-xl text-3xl text-gray-700 transition delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110">Interview GPT</p>
-        </div>
-
-        <div className="">
-          <div className="m-8 text-white font-bold border-0 rounded-lg px-2 py-2 flex gap-2 
-          transition delay-150 duration-300 ease-in-out hover:-translate-y-1 hover:scale-110 cursor:pointer">
-            <header className="flex gap-2">
-              <SignedOut>
-                <SignInButton />
-              </SignedOut>
-              <SignedIn>
-                <UserButton />
-
-                {/* Show Previous Interview button only when signed in */}
-                {allFeedbacks.length > 0 && (
-                  <Link
-                    to="/past-interviews"
-                    state={{ feedbacks: allFeedbacks }}
-                  >
-                    <button className="text-white border-2 border-amber-50 rounded-lg p-2">Previous Interview</button>
-                  </Link>
-                )}
-              </SignedIn>
-              
-            </header>
-            {/* <Link to="/past-interviews">
-              <button className="text-white">Previous Interview</button>
-            </Link> */}
-
-            {/* <Link to="/past-interviews" state={{ feedbacks: allFeedbacks }}>
-  <button className="text-white">Previous Interview</button>
-</Link> */}
-
-          
-          </div>
-        </div>
-      </div>
-
-      <SignedIn>
-        <div className="w-full h-screen overflow-y-auto    ">
-          <div className="max-w-4xl mx-auto flex flex-col sm:flex-row ">
-            {/* <span>@{isSignesIn? user.firstName:""}</span> */}
-            {/* Question Container */}
-
-            <div
-              className={`transition all${
-                feedbackLoadingStatus || feedback
-                  ? "w-full sm:w-1/2 h-auto sm:h-screen p-5"
-                  : "w-full"
-              }`}
-            >
-              <div className="mt-8 flex gap-2 max-sm:block max-sm:m-5 justify-center items-center align-center border-b border-blue-800">
-                <p className=" text-blue-700 ">
-                  Enter the Programming Language on which you want to give
-                  interview :
-                </p>
-                <input
-                  type="text"
-                  placeholder="Enter Language"
-                  value={value} // controlled input
-                  onChange={(e) => setValue(e.target.value)} // update state
-                  className={`w-35 shadow border-2 rounded-lg border-blue-800 outline-none p-1 text-center `}
-                />
-              </div>
-              <h1 className="text-xl mt-14 font-bold">
-                {questionStatus ? "loading question..." : question}
-              </h1>
-              <p className="mt-10 font-semibold">Record your Answer</p>
-              <p className="text-sm text-neutral-700 mb-10">
-                Try to answer accurately and to the point. The assistant will
-                analyze your answer and give results.
-              </p>
-              <div className="flex gap-4">
-                <button
-                  onClick={
-                    isListening ? handleStopListening : handleStartListening
-                  }
-                  className={`text-white px-5 py-2 rounded-full ${
-                    isListening ? "bg-black" : "bg-blue-600"
-                  } ${feedback ? "hidden" : ""}`}
-                >
-                  {isListening ? "Submit Answer" : "Start Answering"}
-                </button>
-
-                <button
-                  onClick={handleReAttempt}
-                  className={`py-2 px-5  rounded-full ${
-                    feedback ? "bg-neutral-100" : ""
-                  } `}
-                >
-                  {feedback ? "Re Attempt Question" : ""}
-                </button>
-
-                <button
-                  onClick={getQuestion}
-                  className={`py-2 px-5 rounded-full  ${
-                    isListening ? "hidden" : "bg-black text-white"
-                  }`}
-                >
-                  {isListening ? "Next Question" : "Generate Question"}
-                </button>
-                <button onClick={getQuestion} disabled={questionStatus}>
-                  {questionStatus ? "Loading…" : "Question Generated "}
-                </button>
-              </div>
-
-              <p className="text-blue-600 mt-8">{transcript}</p>
-            </div>
-            {/* feedback container */}
-            <div
-              className={`transition-all ${
-                // feedbackLoadingStatus || feedback
-                //   ? "w-1/2 border-l h-screen p-5 "
-                //   : "w-0"
-
-                 feedbackLoadingStatus || feedback
-      ? "w-full sm:w-1/2 border-t sm:border-l h-auto p-5"
-      : "hidden"
-              }`}
-            >
-              {feedback && (
-                <div className=" mt-24">
-                  <p>
-                    {feedbackLoadingStatus
-                      ? "Lets see how you answered..."
-                      : ""}
-                  </p>
-                  <div className="border p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <h1>Correctness</h1>
-                      <h1>{feedback.correctness}/5</h1>
+                    <div className="mb-6 w-full">
+                        <label className="cursor-pointer bg-purple-500 hover:bg-purple-600 text-white font-bold py-2 px-4 rounded-lg shadow-md transition-colors duration-200 block text-center">
+                            <input type="file" id="pdfFile" accept=".pdf" className="hidden" onChange={handleFileChange} />
+                            Select a PDF File
+                        </label>
                     </div>
 
-                    <div className="flex gap-1 mt-2">
-                      {[...Array(5)].map((_, i) => {
-                        return (
-                          <div
-                            key={i}
-                            className={`h-1 rounded-full flex-1 ${
-                              i < Number(feedback.correctness)
-                                ? "bg-blue-600"
-                                : "bg-neutral-200"
-                            }`}
-                          ></div>
-                        );
-                      })}
+                    <div ref={pdfDisplayRef} className="w-full space-y-6">
+                        {!isPdfJsReady && !error && (
+                            <div className="message-box text-center">Loading PDF library...</div>
+                        )}
+                        {isPdfJsReady && !resumeFile && !isLoading && (
+                            <div className="message-box">Select a PDF file to begin the analysis.</div>
+                        )}
+                         {isLoading && (
+                            <div className="message-box text-center">Extracting text and rendering PDF...</div>
+                        )}
+                        {error && (
+                            <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative mt-4 text-center" role="alert">
+                                <span className="block">{error}</span>
+                            </div>
+                        )}
                     </div>
-                  </div>
-
-                  <div className="border p-3 rounded-lg">
-                    <div className="flex items-center justify-between">
-                      <h1>Completeness</h1>
-                      <h1>{feedback.completeness}/5</h1>
-                    </div>
-
-                    <div className="flex gap-1 mt-2">
-                      {[...Array(5)].map((_, i) => {
-                        return (
-                          <div
-                            key={i}
-                            className={`h-1 rounded-full flex-1 ${
-                              i < Number(feedback.completeness)
-                                ? "bg-blue-600"
-                                : "bg-neutral-200"
-                            }`}
-                          ></div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                  <p>{feedback.feedback}</p>
                 </div>
-              )}
-            </div>
-          </div>
-        </div>
-      </SignedIn>
-      <SignedOut>
-        <Intro />
-      </SignedOut>
-    </>
-  );
-}
 
-export default Interview;
+                {/* Right Column: Interview Coach */}
+                <div className="analysis-container flex flex-col">
+                    <h2 className="text-3xl font-bold text-gray-800 mb-2">Resume Interview Coach</h2>
+                    <p className="text-gray-600 mb-6">Ask questions about the resume content.</p>
+
+                    {/* Question Input Section */}
+                    <div className="mb-6 flex-grow flex flex-col">
+                        <label className="block text-gray-700 text-sm font-semibold mb-2" htmlFor="user-question">
+                            Ask a Question
+                        </label>
+                        <textarea
+                            id="user-question"
+                            value={userQuestion}
+                            onChange={(e) => setUserQuestion(e.target.value)}
+                            rows="4"
+                            placeholder="e.g., 'What are the candidate's key skills?'"
+                            className="w-full p-4 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200"
+                        />
+                    </div>
+
+                    {/* Action Buttons */}
+                    <div className="flex justify-center mb-6 mt-auto">
+                        <button
+                            onClick={getAnswerFromResume}
+                            disabled={isLoading || isRendering || !resumeContent || !userQuestion.trim()}
+                            className={`w-full py-3 px-8 rounded-full text-white font-bold transition-all duration-300 ${
+                                isLoading || isRendering || !resumeContent || !userQuestion.trim()
+                                    ? 'bg-gray-400 cursor-not-allowed'
+                                    : 'bg-blue-600 hover:bg-blue-700 transform hover:scale-105'
+                            } focus:outline-none focus:ring-4 focus:ring-blue-300`}
+                        >
+                            {isLoading ? 'Thinking...' : 'Get Answer'}
+                        </button>
+                    </div>
+
+                    {/* Response and Error Display */}
+                    {error && (
+                        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded-xl relative mt-4" role="alert">
+                            <span className="block">{error}</span>
+                        </div>
+                    )}
+
+                    {aiResponse && (
+                        <div className="bg-blue-50 p-6 rounded-xl border border-blue-200 mt-4">
+                            <h3 className="text-xl font-semibold text-blue-800 mb-2">AI Response:</h3>
+                            <p className="text-gray-700 leading-relaxed whitespace-pre-wrap">{aiResponse}</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+};
+
+export default App;
